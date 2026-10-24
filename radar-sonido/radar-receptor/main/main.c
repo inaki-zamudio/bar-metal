@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -17,7 +18,60 @@ uint8_t mac_slaves[2][6] = {{0x80, 0x45, 0x6B, 0x36, 0x00, 0xf4},
 
 uint8_t deltas[2] = {0, 0};
 
+int64_t time_emisor[2] = {0, 0};
+
+uint8_t emisor_sync[2] = {0, 0};
+
 #define UI_PERIOD_MS 50
+
+typedef struct {
+  uint8_t d1;
+  uint8_t d2;
+} tuple;
+
+tuple triangular(uint8_t d1, uint8_t d2) { // d1 = t3-t1 d2 = t2-t1
+  float c = 343.0;
+  float d21 = c * d1;
+  float d31 = c * d2;
+  tuple res;
+  // 0,0
+  // 1,0 = x2,0
+  // 1,1 = x3,y3
+  float g = (1 - d21 * d21); //(x2*x2 - d21*d21)/x2
+
+  float h = -d21 //-d21/x2
+
+            float d = (2.0 - d31 * d31) / 1.0; //(x3*x3 + y3*y3 - d31*d31)/y3
+
+  float e = -d31 //-d31/y3
+
+            float f = -1 //
+                         //
+                      float i = d / 2.0 + f * g / 2.0;
+  float j = e + f * h;
+
+  float A = h * h + j * j - 1;
+  float B = (g * h) + (2 * i * j);
+  float C = g * g / 4.0 + i * i;
+
+  float R1_1 = (-B - (B * B - 4 * A * C)) / (2 * A);
+  float R1_2 = (-B + (B * B - 4 * A * C)) / (2 * A);
+
+  float R1 = 0;
+
+  if (R1_1 > 0) {
+    R1 = R1_1
+  } else {
+    R1 = R1_2;
+  }
+
+  float X = g / 2.0 + h * R1;
+  float Y = i + j * R1;
+
+  res.d1 = (uint8_t)X;
+  res.d2 = (uint8_t)Y;
+  return res;
+}
 
 int64_t bytes_to_i64_be(const uint8_t *data, int data_len) {
   if (data_len <= 0 || data_len > 8)
@@ -100,10 +154,13 @@ void on_data_recv(const esp_now_recv_info_t *esp_now_info, const uint8_t *data,
         // sincronizar
         int64_t time = esp_timer_get_time();
         deltas[i] = time - deltas[i];
+        emisor_sync[i] = 1;
         printf("Me sincronice mi delta es %d\n", deltas[i]);
       } else {
-        int64_t ti = bytes_to_i64_be(data, data_len);
-        printf("ruido en %d en t = %lld con delta d = %d\n", i, ti, deltas[i]);
+        int64_t ti = esp_timer_get_time();
+        time_emisor[i] = ti - deltas[i];
+        printf("ruido en %d en t = %lld con delta d = %d\n tf = %lld", i, ti,
+               deltas[i], time_emisor[i]);
       }
     }
   }
@@ -171,7 +228,17 @@ void app_main(void) {
 
     if (audio_ok && ++log_div >= 1000 / UI_PERIOD_MS) {
       log_div = 0;
-      ESP_LOGI(TAG, "mic level: %d", mic_level);
+      if (emisor_sync[0] > 0 && emisor_sync[1] > 0) {
+        int64_t time = esp_timer_get_time();
+        if (mic_level > 65) {
+          printf("tiempos de escucha tM %lld t0 %lld t1 %lld", time,
+                 time_emisor[0], time_emisor[1]);
+        }
+        if (abs((int)time_emisor[0] - (int)time_emisor[1]) < 1000) {
+          printf("RUIDO tM %lld t0 %lld t1 %lld", time, time_emisor[0],
+                 time_emisor[1]);
+        }
+      }
     }
   }
 }
