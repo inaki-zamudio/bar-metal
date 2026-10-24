@@ -8,6 +8,7 @@
 #include "audio.h"
 #include "buttons.h"
 #include "display.h"
+#include "esp_timer.h"
 #include "peer.h"
 
 static const char *TAG = "demo";
@@ -20,6 +21,15 @@ static const int s_button_freq[BTN_COUNT] = {
     [BTN_RIGHT] = 587, [BTN_CENTER] = 784, [BTN_KEY1] = 262,
     [BTN_KEY2] = 330,  [BTN_KEY3] = 392,   [BTN_KEY4] = 523,
 };
+
+void i64_to_bytes_be(int64_t value, uint8_t out[8]) {
+  uint64_t v = (uint64_t)
+      value; // cast a unsigned para que los shifts estén bien definidos
+  for (int i = 7; i >= 0; i--) {
+    out[i] = (uint8_t)(v & 0xFF);
+    v >>= 8;
+  }
+}
 
 static void draw_key(int x, int y, int size, bool pressed) {
   if (pressed) {
@@ -91,7 +101,7 @@ void app_main(void) {
   int log_div = 0;
   peer_init();
   peer_add_mac(master_mac);
-  char msg_buf[11];
+  uint8_t buf[8];
   esp_now_register_recv_cb(on_data_recv);
   esp_now_register_send_cb(on_data_sent);
   while (1) {
@@ -119,8 +129,9 @@ void app_main(void) {
     }
     if (audio_ok) {
       if (mic_level > 65) {
-        snprintf(msg_buf, 11, "%d", mic_level);
-        esp_now_send(master_mac, (const uint8_t *)msg_buf, 11);
+        int64_t time = esp_timer_get_time();
+        i64_to_bytes_be(time, buf);
+        esp_now_send(master_mac, buf, 8);
       }
     }
   }
